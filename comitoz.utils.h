@@ -11,13 +11,25 @@
 typedef enum {false, true} bool;
 
 
-// Prints to stdout AND flushes the buffer, in a reentrant way.
+// Prints to stdout, in a reentrant way.
 // Returns non-zero on failure.
 int write_stdout(const char* str, size_t size)
 {
     if (write(STDOUT_FILENO, str, size) < 0)
     {
         return errno;
+    }
+
+    return 0;
+}
+
+// Same thing as `write_stdout()`, but also flushes `stdout`.
+int fwrite_stdout(const char* str, size_t size)
+{
+    int r = write_stdout(str, size);
+    if (r != 0)
+    {
+        return r;
     }
 
     if (fflush(stdout) != 0)

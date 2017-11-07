@@ -4,6 +4,7 @@
 #include <stdlib.h>    // malloc, realloc, free, getenv
 #include <stdio.h>     // getline
 #include <string.h>    // strtok, strcmp, strcpy, strlen
+#include <sys/stat.h>  // stat
 #include <sys/types.h> // pid_t
 #include <unistd.h>    // getpid
 
@@ -83,7 +84,7 @@ int process_command(char* line)
     int i;
     for (i = 0; i < argc; ++i)
     {
-        printf("arg%d: %s\n", i, args[i]);
+        printf("  arg%d: %s\n", i, args[i]);
     }
     if (input_file != NULL)
     {
@@ -116,6 +117,16 @@ int process_command(char* line)
         }
         else if (args[0][0] == '/')
         {
+            struct stat s;
+            if (stat(args[0], &s) == -1 || !S_ISDIR(s.st_mode))
+            {
+                write_stdout("could not cd to ", 16);
+                write_stdout(args[0], strlen(args[0]));
+                fwrite_stdout("\n", 1);
+
+                return 0;
+            }
+
             if (free_cwd)
             {
                 free(cwd);
@@ -127,6 +138,19 @@ int process_command(char* line)
         else
         {
             char* new_cwd = path_cat(cwd, args[0]);
+
+            struct stat s;
+            if (stat(new_cwd, &s) == -1 || !S_ISDIR(s.st_mode))
+            {
+                write_stdout("could not cd to ", 16);
+                write_stdout(new_cwd, strlen(new_cwd));
+                fwrite_stdout("\n", 1);
+
+                free(new_cwd);
+
+                return 0;
+            }
+
             if (free_cwd)
             {
                 free(cwd);
@@ -137,7 +161,19 @@ int process_command(char* line)
     }
     else if (strcmp(command, "status") == 0)
     {
-        //
+        if (status_is_term)
+        {
+            write_stdout("terminated by signal ", 21);
+        }
+        else
+        {
+            write_stdout("exit status ", 12);
+        }
+
+        char num_str[12];
+        sprintf(num_str, "%d\n", status);
+
+        fwrite_stdout(num_str, strlen(num_str));
     }
     else
     {
@@ -160,7 +196,7 @@ int main_loop(void)
 
     do
     {
-        write_stdout(": ", 2);
+        fwrite_stdout(": ", 2);
 
         while ((chars_read = getline(&line, &getline_buffer_size, stdin)) == -1)
         {
