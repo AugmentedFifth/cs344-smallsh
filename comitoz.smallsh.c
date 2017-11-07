@@ -1,8 +1,11 @@
 #include "comitoz.smallsh.h"
 #include "comitoz.utils.h"
 
-#include <stdio.h>  // getline
-#include <string.h> // strtok, strcmp
+#include <stdlib.h>    // malloc, realloc, free
+#include <stdio.h>     // getline
+#include <string.h>    // strtok, strcmp, strcpy, strlen
+#include <sys/types.h> // pid_t
+#include <unistd.h>    // getpid
 
 
 //
@@ -45,14 +48,17 @@ int process_command(char* line)
         else if (looking_for_input)
         {
             input_file = token;
+            looking_for_input = false;
         }
         else if (looking_for_output)
         {
             output_file = token;
+            looking_for_output = false;
         }
         else if (command == NULL)
         {
-            command = token;
+            command = token;//malloc((strlen(token) + 1) * sizeof(char));
+            //strcpy(command, token);
         }
         else
         {
@@ -60,8 +66,29 @@ int process_command(char* line)
             argc++;
         }
 
-        token = strtok(line, " \n");
+        token = strtok(NULL, " \n");
     }
+
+    if (command != NULL)
+    {
+        printf("command: %s\n", command);
+    }
+    int i;
+    for (i = 0; i < argc; ++i)
+    {
+        printf("arg%d: %s\n", i, args[i]);
+    }
+    if (input_file != NULL)
+    {
+        printf("input file: %s\n", input_file);
+    }
+    if (output_file != NULL)
+    {
+        printf("output file: %s\n", output_file);
+    }
+    printf("background: %s\n", background ? "true" : "false");
+
+    return 0;
 }
 
 // Enters the main loop, spitting out a prompt and waiting for commands,
@@ -84,7 +111,7 @@ int main_loop(void)
             clearerr(stdin);
         }
 
-        if ((command_result = process_command()) != 0)
+        if ((command_result = process_command(line)) != 0)
         {
             return command_result;
         }
