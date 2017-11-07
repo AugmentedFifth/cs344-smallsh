@@ -1,11 +1,18 @@
 #include "comitoz.smallsh.h"
 #include "comitoz.utils.h"
 
-#include <stdlib.h>    // malloc, realloc, free
+#include <stdlib.h>    // malloc, realloc, free, getenv
 #include <stdio.h>     // getline
 #include <string.h>    // strtok, strcmp, strcpy, strlen
 #include <sys/types.h> // pid_t
 #include <unistd.h>    // getpid
+
+
+// Globals
+int status = 0;
+bool status_is_term = false;
+char* cwd;
+bool free_cwd = false;
 
 
 //
@@ -88,6 +95,55 @@ int process_command(char* line)
     }
     printf("background: %s\n", background ? "true" : "false");
 
+    // Start doing stuff based on the parsed command, builtins first.
+    if (strcmp(command, "exit") == 0)
+    {
+        // TODO: Kill all processes and jobs here
+
+        return -1;
+    }
+    else if (strcmp(command, "cd") == 0)
+    {
+        printf("%s\n", cwd);
+        if (argc == 0)
+        {
+            if (free_cwd)
+            {
+                free(cwd);
+                free_cwd = false;
+            }
+            cwd = getenv("HOME");
+        }
+        else if (args[0][0] == '/')
+        {
+            if (free_cwd)
+            {
+                free(cwd);
+            }
+            cwd = malloc((strlen(args[0]) + 1) * sizeof(char));
+            free_cwd = true;
+            strcpy(cwd, args[0]);
+        }
+        else
+        {
+            char* new_cwd = path_cat(cwd, args[0]);
+            if (free_cwd)
+            {
+                free(cwd);
+            }
+            free_cwd = true;
+            cwd = new_cwd;
+        }
+    }
+    else if (strcmp(command, "status") == 0)
+    {
+        //
+    }
+    else
+    {
+        //
+    }
+
     return 0;
 }
 
@@ -105,7 +161,7 @@ int main_loop(void)
     do
     {
         write_stdout(": ", 2);
-        
+
         while ((chars_read = getline(&line, &getline_buffer_size, stdin)) == -1)
         {
             clearerr(stdin);
@@ -124,5 +180,15 @@ int main_loop(void)
 
 int main(void)
 {
-    return main_loop();
+    cwd = getenv("HOME");
+
+    int ret = main_loop();
+
+    // Cleanup
+    if (free_cwd)
+    {
+        free(cwd);
+    }
+
+    return ret;
 }
