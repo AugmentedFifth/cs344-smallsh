@@ -7,6 +7,7 @@
 #include <string.h>    // strtok, strcmp, strcpy, strlen
 #include <sys/stat.h>  // stat
 #include <sys/types.h> // pid_t
+#include <sys/wait.h>  // waitpid
 #include <unistd.h>    // getpid, fork, exec, dup2, etc.
 
 
@@ -19,7 +20,6 @@ bool free_cwd = false;
 
 // Handles `fork()`ing and `exec()`ing commands.
 int exec_command(const char*  command,
-                 int          argc,
                  const char** args,
                  const char*  input_file,
                  const char*  output_file,
@@ -85,17 +85,28 @@ int exec_command(const char*  command,
                 }
             }
 
+            // `exec()` away
+            if (execvp(command, args) == -1)
+            {
+                // TODO: iunno
+                write_stderr("Could not exec ", 15);
+                write_stderr(command, strlen(command));
+                fwrite_stderr("\n", 1);
+                exit(errno);
+            }
+
             break;
         }
         default: // In the parent process
         {
             if (background)
             {
-            
+                
             }
             else
             {
-            
+                int spawned_exit_status;
+                waitpid(spawned_pid, &spawned_exit_status, 0);
             }
                 
             break;
@@ -116,8 +127,8 @@ int process_command(char* line)
 
     // State management for the parsing
     char* command = NULL;
-    char* args[512];
-    int argc = 0;
+    char* args[514];
+    int argc = 1;
     char* input_file = NULL;
     bool looking_for_input = false;
     char* output_file = NULL;
@@ -164,6 +175,9 @@ int process_command(char* line)
 
         token = strtok(NULL, " \n");
     }
+
+    args[0] = command;
+    args[argc] = NULL;
 
     if (command != NULL)
     {
@@ -265,7 +279,7 @@ int process_command(char* line)
     }
     else
     {
-        exec_command(command, argc, args, input_file, output_file, background);
+        exec_command(command, args, input_file, output_file, background);
     }
 
     return 0;
