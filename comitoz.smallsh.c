@@ -8,15 +8,12 @@
 #include <sys/stat.h>  // stat
 #include <sys/types.h> // pid_t
 #include <sys/wait.h>  // waitpid
-#include <unistd.h>    // chdir, getpid, fork, exec, dup2, etc.
+#include <unistd.h>    // chdir, getcwd, getpid, fork, exec, dup2, etc.
 
 
 // Globals
 int status = 0;
 bool status_is_term = false;
-
-char* cwd;
-bool free_cwd = false;
 
 pid_t* children;
 int child_count = 0;
@@ -112,8 +109,6 @@ int exec_command(const char*  command,
                 write_stderr("Could not exec ", 15);
                 write_stderr(command, strlen(command));
                 fwrite_stderr("\n", 1);
-                // Close files so we don't accidentally create random
-                // empty sticky-bit files, which no one wants
                 if (input_fd != -1)
                 {
                     close(input_fd);
@@ -192,7 +187,7 @@ int handle_bg_processes(void)
                 sprintf(
                     num_str,
                     "%d terminated with exit code %d\n",
-                    children[1],
+                    children[i],
                     exit_status
                 );
                 fwrite_stdout(num_str, strlen(num_str));
@@ -313,64 +308,34 @@ int process_command(char* line)
     }
     else if (strcmp(command, "cd") == 0)
     {
-        printf("%s\n", cwd);
+        ////////////
+        char cwd_buf[1024];
+        printf("%s\n", getcwd(cwd_buf, 1024 * sizeof(char)));
+        ////////////
+
         if (argc < 2)
         {
-            if (free_cwd)
+            const char* target = getenv("HOME");
+            if (chdir(target) == -1)
             {
-                free(cwd);
-                free_cwd = false;
-            }
-            cwd = getenv("HOME");
-
-            chdir(cwd);
-        }
-        else if (args[1][0] == '/')
-        {
-            struct stat s;
-            if (stat(args[1], &s) == -1 || !S_ISDIR(s.st_mode))
-            {
-                write_stdout("could not cd to ", 16);
-                write_stdout(args[1], strlen(args[1]));
-                fwrite_stdout("\n", 1);
+                write_stderr("could not cd to ", 16);
+                write_stderr(target, strlen(target));
+                fwrite_stderr("\n", 1);
 
                 return 0;
             }
-
-            if (free_cwd)
-            {
-                free(cwd);
-            }
-            cwd = malloc((strlen(args[1]) + 1) * sizeof(char));
-            free_cwd = true;
-            strcpy(cwd, args[1]);
-
-            chdir(cwd);
         }
         else
         {
-            char* new_cwd = path_cat(cwd, args[1]);
-
-            struct stat s;
-            if (stat(new_cwd, &s) == -1 || !S_ISDIR(s.st_mode))
+            const char* target = args[1];
+            if (chdir(target) == -1)
             {
-                write_stdout("could not cd to ", 16);
-                write_stdout(new_cwd, strlen(new_cwd));
-                fwrite_stdout("\n", 1);
-
-                free(new_cwd);
+                write_stderr("could not cd to ", 16);
+                write_stderr(target, strlen(target));
+                fwrite_stderr("\n", 1);
 
                 return 0;
             }
-
-            if (free_cwd)
-            {
-                free(cwd);
-            }
-            free_cwd = true;
-            cwd = new_cwd;
-
-            chdir(cwd);
         }
     }
     else if (strcmp(command, "status") == 0)
@@ -455,8 +420,7 @@ int main_loop(void)
 
 int main(void)
 {
-    cwd = getenv("HOME");
-    chdir(cwd);
+    chdir(getenv("HOME"));
 
     child_capacity = 12;
     children = malloc(child_capacity * sizeof(pid_t));
@@ -465,10 +429,6 @@ int main(void)
 
     // Cleanup
     free(children);
-    if (free_cwd)
-    {
-        free(cwd);
-    }
 
     return ret;
 }
