@@ -1,12 +1,13 @@
 #include "comitoz.smallsh.h"
 #include "comitoz.utils.h"
 
+#include <fcntl.h>     // open, close
 #include <stdlib.h>    // malloc, realloc, free, getenv
-#include <stdio.h>     // getline
+#include <stdio.h>     // getline, perror
 #include <string.h>    // strtok, strcmp, strcpy, strlen
 #include <sys/stat.h>  // stat
 #include <sys/types.h> // pid_t
-#include <unistd.h>    // getpid
+#include <unistd.h>    // getpid, fork, exec, dup2, etc.
 
 
 // Globals
@@ -16,7 +17,94 @@ char* cwd;
 bool free_cwd = false;
 
 
-//
+// Handles `fork()`ing and `exec()`ing commands.
+int exec_command(const char*  command,
+                 int          argc,
+                 const char** args,
+                 const char*  input_file,
+                 const char*  output_file,
+                 bool         background)
+{
+    pid_t spawned_pid = fork();
+    switch (spawned_pid)
+    {
+        case -1:
+        {
+            perror("fork() failed!");
+            // TODO: Cleanup here too.
+            exit(1);
+            break;
+        }
+        case 0:  // In the child process
+        {
+            int input_fd  = -1;
+            int output_fd = -1;
+            // Redirect inputs and outputs as necessary
+            if (input_file != NULL)
+            {
+                input_fd = open(input_file, O_RDONLY);
+                if (input_fd == -1)
+                {
+                    write_stderr("Could not open ", 15);
+                    write_stderr(input_file, strlen(input_file));
+                    fwrite_stderr(" for reading\n", 13);
+                    exit(errno);
+                    break;
+                }
+
+                if (dup2(input_fd, STDIN_FILENO) == -1)
+                {
+                    perror("dup2() failed!");
+                    close(input_fd);
+                    exit(errno);
+                    break;
+                }
+            }
+            if (output_file != NULL)
+            {
+                output_fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC);
+                if (output_fd == -1)
+                {
+                    write_stderr("Could not open ", 15);
+                    write_stderr(output_file, strlen(output_file));
+                    fwrite_stderr(" for writing\n", 13);
+                    exit(errno);
+                    break;
+                }
+
+                if (dup2(output_fd, STDOUT_FILENO) == -1)
+                {
+                    perror("dup2() failed!");
+                    close(output_fd);
+                    if (input_fd != -1)
+                    {
+                        close(input_fd);
+                    }
+                    exit(errno);
+                    break;
+                }
+            }
+
+            break;
+        }
+        default: // In the parent process
+        {
+            if (background)
+            {
+            
+            }
+            else
+            {
+            
+            }
+                
+            break;
+        }
+    }
+}
+
+// Parses a command and redirects its content to the corresponding
+// behavior.
 int process_command(char* line)
 {
     char* token = strtok(line, " \n");
@@ -177,7 +265,7 @@ int process_command(char* line)
     }
     else
     {
-        //
+        exec_command(command, argc, args, input_file, output_file, background);
     }
 
     return 0;
@@ -228,3 +316,4 @@ int main(void)
 
     return ret;
 }
+
