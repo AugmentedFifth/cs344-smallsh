@@ -49,7 +49,7 @@ int exec_command(const char*  command,
             {
                 input_fd = open(
                     input_file != NULL ? input_file : "/dev/null",
-                    O_RDONLY | O_CLOEXEC
+                    O_RDONLY
                 );
                 if (input_fd == -1)
                 {
@@ -76,7 +76,8 @@ int exec_command(const char*  command,
             {
                 output_fd = open(
                     output_file != NULL ? output_file : "/dev/null",
-                    O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC
+                    O_WRONLY | O_CREAT | O_TRUNC,
+                    0644
                 );
                 if (output_fd == -1)
                 {
@@ -147,6 +148,7 @@ int exec_command(const char*  command,
                     );
                 }
                 children[child_count] = spawned_pid;
+                child_count++;
             }
             else
             {
@@ -172,14 +174,19 @@ int handle_bg_processes(void)
             case -1:
             {
                 perror("waitpid() failed!");
+
                 return 1;
             }
             case 0:
             {
+                printf("<><> waited == 0\n");
+
                 break;
             }
             default:
             {
+                printf("<><> default\n");
+
                 write_stdout("Background process ", 19);
                 char num_str[64];
                 sprintf(
