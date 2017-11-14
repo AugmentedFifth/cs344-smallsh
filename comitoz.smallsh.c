@@ -217,6 +217,8 @@ int handle_bg_processes(void)
 // behavior.
 int process_command(char* line)
 {
+    int ret = 0;
+
     char* token = strtok(line, " \n");
     // Handle blank lines and comments
     if (token == NULL || token[0] == '#')
@@ -226,7 +228,7 @@ int process_command(char* line)
 
     // State management for the parsing
     char* command = NULL;
-    char* args[514];
+    char* args[512 + 2];
     int argc = 1;
     char* input_file = NULL;
     bool looking_for_input = false;
@@ -253,22 +255,22 @@ int process_command(char* line)
         }
         else if (looking_for_input)
         {
-            input_file = token;
+            input_file = expand_pid(token);
             looking_for_input = false;
         }
         else if (looking_for_output)
         {
-            output_file = token;
+            output_file = expand_pid(token);
             looking_for_output = false;
         }
         else if (command == NULL)
         {
-            command = token;//malloc((strlen(token) + 1) * sizeof(char));
+            command = expand_pid(token);//malloc((strlen(token) + 1) * sizeof(char));
             //strcpy(command, token);
         }
         else
         {
-            args[argc] = token;
+            args[argc] = expand_pid(token);
             argc++;
         }
 
@@ -304,7 +306,7 @@ int process_command(char* line)
     {
         // TODO: Kill all processes and jobs here
 
-        return -1;
+        ret = -1;
     }
     else if (strcmp(command, "cd") == 0)
     {
@@ -321,8 +323,6 @@ int process_command(char* line)
                 write_stderr("could not cd to ", 16);
                 write_stderr(target, strlen(target));
                 fwrite_stderr("\n", 1);
-
-                return 0;
             }
         }
         else
@@ -333,8 +333,6 @@ int process_command(char* line)
                 write_stderr("could not cd to ", 16);
                 write_stderr(target, strlen(target));
                 fwrite_stderr("\n", 1);
-
-                return 0;
             }
         }
     }
@@ -356,7 +354,7 @@ int process_command(char* line)
     }
     else
     {
-        return exec_command(
+        ret = exec_command(
             command,
             args,
             input_file,
@@ -365,7 +363,22 @@ int process_command(char* line)
         );
     }
 
-    return 0;
+    // Cleanup
+    free(command);
+    for (i = 1; i < argc; ++i)
+    {
+        free(args[i]);
+    }
+    if (input_file != NULL)
+    {
+        free(input_file);
+    }
+    if (output_file != NULL)
+    {
+        free(output_file);
+    }
+
+    return ret;
 }
 
 // Enters the main loop, spitting out a prompt and waiting for commands,

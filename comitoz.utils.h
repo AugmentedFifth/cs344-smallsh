@@ -3,8 +3,8 @@
 #include <errno.h>  // errno
 #include <stdlib.h> // calloc, realloc
 #include <stdio.h>  // fflush, ferror
-#include <string.h> // strtok, strlen, strcpy, strcmp
-#include <unistd.h> // write, STDOUT_FILENO
+#include <string.h> // strlen, strncat, strstr
+#include <unistd.h> // getpid, STDOUT_FILENO, STDERR_FILENO, write
 
 
 // `typedef`s
@@ -68,50 +68,45 @@ int fwrite_stderr(const char* str, size_t size)
     return 0;
 }
 
-// Concatenates two paths, the first one absolute and the second one
-// relative, yielding an absolute path. Call must `free()` the returned
-// buffer.
-//
-// Returns `NULL` on error.
-char* path_cat(char* abs, char* rel)
+// Expand all instances of "$$" into the current PID, returning a pointer to
+// a new string that must be `free()`d by the caller.
+char* expand_pid(char* str)
 {
-    int buf_str_len = strlen(abs);
-    int buf_size = 2 * buf_str_len + 1;
-    char* buf = calloc(buf_size, sizeof(char));
-    strcpy(buf, abs);
+    int str_len = strlen(str);
 
-    char* token = strtok(rel, "/");
-    while (token != NULL)
+    int buf_cap = str_len + 1;
+    char* buf = calloc(buf_cap, sizeof(char));
+    int buf_len = 0;
+
+    char pid_str[12];
+    sprintf(pid_str, "%d", getpid());
+    int pid_str_len = strlen(pid_str);
+
+    char* substr_loc;
+    char* str_pos = str;
+    while ((substr_loc = strstr(str_pos, "$$")) != NULL)
     {
-        if (strcmp(token, "..") == 0)
+        int copy_size = substr_loc - str_pos;
+        buf_len += copy_size + pid_str_len;
+        if (buf_cap < buf_len + 1)
         {
-            while (buf[buf_str_len - 1] != '/')
-            {
-                buf[buf_str_len - 1] = '\0';
-                buf_str_len--;
-            }
-
-            if (buf_str_len > 1)
-            {
-                buf[buf_str_len - 1] = '\0';
-                buf_str_len--;
-            }
-        }
-        else if (strcmp(token, ".") != 0)
-        {
-            int token_size = strlen(token);
-            if (buf_str_len + token_size + 1 > buf_size)
-            {
-                buf_size += 2 * token_size + 1;
-                buf = realloc(buf, buf_size * sizeof(char));
-            }
-
-            strcat(buf, "/");
-            strcat(buf, token);
+            buf_cap = buf_len + 1;
+            buf = realloc(buf, buf_cap * sizeof(char));
         }
 
-        token = strtok(NULL, "/");
+        strncat(buf, str_pos, copy_size);
+        strncat(buf, pid_str, pid_str_len);
+
+        str_pos = substr_loc + strlen("$$");
     }
+
+    buf_len += strlen(str_pos);
+    if (buf_cap < buf_len + 1)
+    {
+        buf_cap = buf_len + 1;
+        buf = realloc(buf, buf_cap * sizeof(char));
+    }
+    strcat(buf, str_pos);
 
     return buf;
 }
