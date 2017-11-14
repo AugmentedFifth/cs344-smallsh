@@ -8,7 +8,7 @@
 #include <sys/stat.h>  // stat
 #include <sys/types.h> // pid_t
 #include <sys/wait.h>  // waitpid
-#include <unistd.h>    // getpid, fork, exec, dup2, etc.
+#include <unistd.h>    // chdir, getpid, fork, exec, dup2, etc.
 
 
 // Globals
@@ -49,7 +49,7 @@ int exec_command(const char*  command,
             {
                 input_fd = open(
                     input_file != NULL ? input_file : "/dev/null",
-                    O_RDONLY
+                    O_RDONLY | O_CLOEXEC
                 );
                 if (input_fd == -1)
                 {
@@ -76,7 +76,7 @@ int exec_command(const char*  command,
             {
                 output_fd = open(
                     output_file != NULL ? output_file : "/dev/null",
-                    O_WRONLY | O_CREAT | O_TRUNC
+                    O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC
                 );
                 if (output_fd == -1)
                 {
@@ -111,6 +111,16 @@ int exec_command(const char*  command,
                 write_stderr("Could not exec ", 15);
                 write_stderr(command, strlen(command));
                 fwrite_stderr("\n", 1);
+                // Close files so we don't accidentally create random
+                // empty sticky-bit files, which no one wants
+                if (input_fd != -1)
+                {
+                    close(input_fd);
+                }
+                if (output_fd != -1)
+                {
+                    close(output_fd);
+                }
                 status = 1;
                 status_is_term = false;
                 exit(errno);
@@ -297,7 +307,7 @@ int process_command(char* line)
     else if (strcmp(command, "cd") == 0)
     {
         printf("%s\n", cwd);
-        if (argc == 0)
+        if (argc < 2)
         {
             if (free_cwd)
             {
@@ -305,14 +315,16 @@ int process_command(char* line)
                 free_cwd = false;
             }
             cwd = getenv("HOME");
+
+            chdir(cwd);
         }
-        else if (args[0][0] == '/')
+        else if (args[1][0] == '/')
         {
             struct stat s;
-            if (stat(args[0], &s) == -1 || !S_ISDIR(s.st_mode))
+            if (stat(args[1], &s) == -1 || !S_ISDIR(s.st_mode))
             {
                 write_stdout("could not cd to ", 16);
-                write_stdout(args[0], strlen(args[0]));
+                write_stdout(args[1], strlen(args[1]));
                 fwrite_stdout("\n", 1);
 
                 return 0;
@@ -322,13 +334,15 @@ int process_command(char* line)
             {
                 free(cwd);
             }
-            cwd = malloc((strlen(args[0]) + 1) * sizeof(char));
+            cwd = malloc((strlen(args[1]) + 1) * sizeof(char));
             free_cwd = true;
-            strcpy(cwd, args[0]);
+            strcpy(cwd, args[1]);
+
+            chdir(cwd);
         }
         else
         {
-            char* new_cwd = path_cat(cwd, args[0]);
+            char* new_cwd = path_cat(cwd, args[1]);
 
             struct stat s;
             if (stat(new_cwd, &s) == -1 || !S_ISDIR(s.st_mode))
@@ -348,6 +362,8 @@ int process_command(char* line)
             }
             free_cwd = true;
             cwd = new_cwd;
+
+            chdir(cwd);
         }
     }
     else if (strcmp(command, "status") == 0)
@@ -396,6 +412,11 @@ int main_loop(void)
         int bg_res = handle_bg_processes();
         if (bg_res != 0)
         {
+            if (line != NULL)
+            {
+                free(line);
+            }
+
             return bg_res;
         }
 
@@ -408,11 +429,19 @@ int main_loop(void)
 
         if ((command_result = process_command(line)) != 0)
         {
+            if (line != NULL)
+            {
+                free(line);
+            }
+
             return command_result;
         }
     } while (1);
 
-    free(line);
+    if (line != NULL)
+    {
+        free(line);
+    }
 
     return 0;
 }
@@ -420,6 +449,7 @@ int main_loop(void)
 int main(void)
 {
     cwd = getenv("HOME");
+    chdir(cwd);
 
     child_capacity = 12;
     children = malloc(child_capacity * sizeof(pid_t));

@@ -1,5 +1,7 @@
 #pragma once
 
+#include "comitoz.utils.h"
+
 
 // Forward declarations
 int exec_command(const char*  command,
