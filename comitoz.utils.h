@@ -40,6 +40,34 @@ int fwrite_stdout(const char* str, size_t size)
     return 0;
 }
 
+// Self-explanatory; same thing as `write_stdout()` but for stderr
+int write_stderr(const char* str, size_t size)
+{
+    if (write(STDERR_FILENO, str, size) < 0)
+    {
+        return errno;
+    }
+
+    return 0;
+}
+
+// Self-explanatory; same thing as `fwrite_stdout()` but for stderr
+int fwrite_stderr(const char* str, size_t size)
+{
+    int r = write_stderr(str, size);
+    if (r != 0)
+    {
+        return r;
+    }
+
+    if (fflush(stderr) != 0)
+    {
+        return ferror(stderr);
+    }
+
+    return 0;
+}
+
 // Concatenates two paths, the first one absolute and the second one
 // relative, yielding an absolute path. Call must `free()` the returned
 // buffer.
@@ -87,4 +115,3 @@ char* path_cat(char* abs, char* rel)
 
     return buf;
 }
-

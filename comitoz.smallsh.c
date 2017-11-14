@@ -4,7 +4,7 @@
 #include <fcntl.h>     // open, close
 #include <stdlib.h>    // malloc, realloc, free, getenv
 #include <stdio.h>     // getline, perror
-#include <string.h>    // strtok, strcmp, strcpy, strlen
+#include <string.h>    // memmove, strtok, strcmp, strcpy, strlen
 #include <sys/stat.h>  // stat
 #include <sys/types.h> // pid_t
 #include <sys/wait.h>  // waitpid
@@ -14,13 +14,18 @@
 // Globals
 int status = 0;
 bool status_is_term = false;
+
 char* cwd;
 bool free_cwd = false;
+
+pid_t* children;
+int child_count = 0;
+int child_capacity;
 
 
 // Handles `fork()`ing and `exec()`ing commands.
 int exec_command(const char*  command,
-                 const char** args,
+                 char* const* args,
                  const char*  input_file,
                  const char*  output_file,
                  bool         background)
@@ -31,23 +36,28 @@ int exec_command(const char*  command,
         case -1:
         {
             perror("fork() failed!");
-            // TODO: Cleanup here too.
-            exit(1);
-            break;
+            status = 1;
+            status_is_term = false;
+            return 1;
         }
         case 0:  // In the child process
         {
             int input_fd  = -1;
             int output_fd = -1;
             // Redirect inputs and outputs as necessary
-            if (input_file != NULL)
+            if (input_file != NULL || background)
             {
-                input_fd = open(input_file, O_RDONLY);
+                input_fd = open(
+                    input_file != NULL ? input_file : "/dev/null",
+                    O_RDONLY
+                );
                 if (input_fd == -1)
                 {
                     write_stderr("Could not open ", 15);
                     write_stderr(input_file, strlen(input_file));
                     fwrite_stderr(" for reading\n", 13);
+                    status = 1;
+                    status_is_term = false;
                     exit(errno);
                     break;
                 }
@@ -56,18 +66,25 @@ int exec_command(const char*  command,
                 {
                     perror("dup2() failed!");
                     close(input_fd);
+                    status = 1;
+                    status_is_term = false;
                     exit(errno);
                     break;
                 }
             }
-            if (output_file != NULL)
+            if (output_file != NULL || background)
             {
-                output_fd = open(output_file, O_WRONLY | O_CREAT | O_TRUNC);
+                output_fd = open(
+                    output_file != NULL ? output_file : "/dev/null",
+                    O_WRONLY | O_CREAT | O_TRUNC
+                );
                 if (output_fd == -1)
                 {
                     write_stderr("Could not open ", 15);
                     write_stderr(output_file, strlen(output_file));
                     fwrite_stderr(" for writing\n", 13);
+                    status = 1;
+                    status_is_term = false;
                     exit(errno);
                     break;
                 }
@@ -80,6 +97,8 @@ int exec_command(const char*  command,
                     {
                         close(input_fd);
                     }
+                    status = 1;
+                    status_is_term = false;
                     exit(errno);
                     break;
                 }
@@ -92,7 +111,10 @@ int exec_command(const char*  command,
                 write_stderr("Could not exec ", 15);
                 write_stderr(command, strlen(command));
                 fwrite_stderr("\n", 1);
+                status = 1;
+                status_is_term = false;
                 exit(errno);
+                break;
             }
 
             break;
@@ -101,17 +123,82 @@ int exec_command(const char*  command,
         {
             if (background)
             {
-                
+                write_stdout("Started background process ", 27);
+                char num_str[12];
+                sprintf(num_str, "%d\n", spawned_pid);
+                fwrite_stdout(num_str, strlen(num_str));
+
+                if (child_count >= child_capacity)
+                {
+                    child_capacity *= 2;
+                    children = realloc(
+                        children,
+                        child_capacity * sizeof(pid_t)
+                    );
+                }
+                children[child_count] = spawned_pid;
             }
             else
             {
-                int spawned_exit_status;
-                waitpid(spawned_pid, &spawned_exit_status, 0);
+                waitpid(spawned_pid, &status, 0);
             }
-                
+
             break;
         }
     }
+
+    return 0;
+}
+
+int handle_bg_processes(void)
+{
+    int i;
+    for (i = 0; i < child_count; ++i)
+    {
+        int exit_status;
+        pid_t waited = waitpid(children[i], &exit_status, WNOHANG);
+        switch (waited)
+        {
+            case -1:
+            {
+                perror("waitpid() failed!");
+                return 1;
+            }
+            case 0:
+            {
+                break;
+            }
+            default:
+            {
+                write_stdout("Background process ", 19);
+                char num_str[64];
+                sprintf(
+                    num_str,
+                    "%d terminated with exit code %d\n",
+                    children[1],
+                    exit_status
+                );
+                fwrite_stdout(num_str, strlen(num_str));
+
+                int trailing_entries = child_count - i - 1;
+                if (trailing_entries > 0)
+                {
+                    memmove(
+                        &children[i],
+                        &children[i + 1],
+                        trailing_entries * sizeof(pid_t)
+                    );
+                }
+
+                child_count--;
+                i--;
+
+                break;
+            }
+        }
+    }
+
+    return 0;
 }
 
 // Parses a command and redirects its content to the corresponding
@@ -188,6 +275,7 @@ int process_command(char* line)
     {
         printf("  arg%d: %s\n", i, args[i]);
     }
+    printf("  last arg is NULL: %s\n", args[i] == NULL ? "true" : "false");
     if (input_file != NULL)
     {
         printf("input file: %s\n", input_file);
@@ -197,6 +285,7 @@ int process_command(char* line)
         printf("output file: %s\n", output_file);
     }
     printf("background: %s\n", background ? "true" : "false");
+    fflush(stdout);
 
     // Start doing stuff based on the parsed command, builtins first.
     if (strcmp(command, "exit") == 0)
@@ -279,7 +368,13 @@ int process_command(char* line)
     }
     else
     {
-        exec_command(command, args, input_file, output_file, background);
+        return exec_command(
+            command,
+            args,
+            input_file,
+            output_file,
+            background
+        );
     }
 
     return 0;
@@ -298,6 +393,12 @@ int main_loop(void)
 
     do
     {
+        int bg_res = handle_bg_processes();
+        if (bg_res != 0)
+        {
+            return bg_res;
+        }
+
         fwrite_stdout(": ", 2);
 
         while ((chars_read = getline(&line, &getline_buffer_size, stdin)) == -1)
@@ -320,9 +421,13 @@ int main(void)
 {
     cwd = getenv("HOME");
 
+    child_capacity = 12;
+    children = malloc(child_capacity * sizeof(pid_t));
+
     int ret = main_loop();
 
     // Cleanup
+    free(children);
     if (free_cwd)
     {
         free(cwd);
@@ -330,4 +435,3 @@ int main(void)
 
     return ret;
 }
-
