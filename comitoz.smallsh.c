@@ -22,13 +22,8 @@ int child_capacity;
 bool allow_bg = true;
 
 
-/*
 // Signal handler for `SIGINT`s sent to the main shell.
-void SIGINT_main(int signo)
-{
-
-}
-*/
+void SIGINT_main(int signo) {}
 
 // Signal handler for `SIGTSTP`s sent to the main shell.
 //
@@ -40,11 +35,11 @@ void SIGTSTP_main(int signo)
 
     if (allow_bg)
     {
-        fwrite_stdout("Exiting foreground-only mode\n", 29);
+        fwrite_stdout("\nExiting foreground-only mode", 29);
     }
     else
     {
-        fwrite_stdout("Entering foreground-only mode (& is now ignored)\n", 49);
+        fwrite_stdout("\nEntering foreground-only mode (& is now ignored)", 49);
     }
 }
 
@@ -67,16 +62,17 @@ int exec_command(const char*  command,
         {
             // If this is a foreground process, we want it to accept `SIGINT`s
             // normally instead of ignoring them. If this is a background
-            // process then we don't have to do anything since the `SIG_IGN`
-            // will get inherited, which is the desired behavior
-            if (!background)
+            // process then we want to ignore `SIGINT`s using `SIG_IGN`
+            struct sigaction SIGINT_action = {0};
+            if (background)
             {
-                struct sigaction SIGINT_default = {0};
-
-                SIGINT_default.sa_handler = SIG_DFL;
-
-                sigaction(SIGINT, &SIGINT_default, NULL);
+                SIGINT_action.sa_handler = SIG_IGN;
             }
+            else
+            {
+                SIGINT_action.sa_handler = SIG_DFL;
+            }
+            sigaction(SIGINT, &SIGINT_action, NULL);
 
             int input_fd  = -1;
             int output_fd = -1;
@@ -92,24 +88,14 @@ int exec_command(const char*  command,
                     write_stderr("cannot open ", 12);
                     write_stderr(input_file, strlen(input_file));
                     fwrite_stderr(" for input\n", 11);
-                    if (!background)
-                    {
-                        status = 1;
-                        status_is_term = false;
-                    }
-                    exit(errno);
+                    exit(1);
                     break;
                 }
 
                 if (dup2(input_fd, STDIN_FILENO) == -1)
                 {
                     perror("dup2() failed!");
-                    if (!background)
-                    {
-                        status = 1;
-                        status_is_term = false;
-                    }
-                    exit(errno);
+                    exit(1);
                     break;
                 }
             }
@@ -125,24 +111,14 @@ int exec_command(const char*  command,
                     write_stderr("Could not open ", 15);
                     write_stderr(output_file, strlen(output_file));
                     fwrite_stderr(" for writing\n", 13);
-                    if (!background)
-                    {
-                        status = 1;
-                        status_is_term = false;
-                    }
-                    exit(errno);
+                    exit(1);
                     break;
                 }
 
                 if (dup2(output_fd, STDOUT_FILENO) == -1)
                 {
                     perror("dup2() failed!");
-                    if (!background)
-                    {
-                        status = 1;
-                        status_is_term = false;
-                    }
-                    exit(errno);
+                    exit(1);
                     break;
                 }
             }
@@ -150,17 +126,9 @@ int exec_command(const char*  command,
             // `exec()` away
             if (execvp(command, args) == -1)
             {
-                // TODO: iunno
-                write_stderr("Could not exec ", 15);
                 write_stderr(command, strlen(command));
-                fwrite_stderr("\n", 1);
-                if (!background)
-                {
-                    status = 1;
-                    status_is_term = false;
-                }
-                exit(errno);
-                break;
+                fwrite_stderr(": no such file or directory\n", 28);
+                exit(1);
             }
 
             break;
@@ -188,7 +156,7 @@ int exec_command(const char*  command,
             else
             {
                 int wstatus;
-                waitpid(spawned_pid, &wstatus, 0);
+                while (waitpid(spawned_pid, &wstatus, 0) == -1) {}
 
                 if (WIFEXITED(wstatus)) // Child terminated normally
                 {
@@ -339,8 +307,7 @@ int process_command(char* line)
         }
         else if (command == NULL)
         {
-            command = expand_pid(token);//malloc((strlen(token) + 1) * sizeof(char));
-            //strcpy(command, token);
+            command = expand_pid(token);
         }
         else
         {
@@ -354,6 +321,8 @@ int process_command(char* line)
     args[0] = command;
     args[argc] = NULL;
 
+    ////////// dEbUg sHiT //////////
+    /*
     if (command != NULL)
     {
         printf("command: %s\n", command);
@@ -374,6 +343,7 @@ int process_command(char* line)
     }
     printf("background: %s\n", background ? "true" : "false");
     fflush(stdout);
+    */
 
     // Start doing stuff based on the parsed command, builtins first.
     if (strcmp(command, "exit") == 0)
@@ -385,8 +355,8 @@ int process_command(char* line)
     else if (strcmp(command, "cd") == 0)
     {
         ////////////
-        char cwd_buf[1024];
-        printf("%s\n", getcwd(cwd_buf, 1024 * sizeof(char)));
+        //char cwd_buf[1024];
+        //printf("%s\n", getcwd(cwd_buf, 1024 * sizeof(char)));
         ////////////
 
         if (argc < 2)
@@ -418,7 +388,7 @@ int process_command(char* line)
         }
         else
         {
-            write_stdout("exit status ", 12);
+            write_stdout("exit value ", 11);
         }
 
         char num_str[12];
@@ -439,6 +409,7 @@ int process_command(char* line)
 
     // Cleanup
     free(command);
+    int i;
     for (i = 1; i < argc; ++i)
     {
         free(args[i]);
@@ -484,6 +455,8 @@ int main_loop(void)
         while ((chars_read = getline(&line, &getline_buffer_size, stdin)) == -1)
         {
             clearerr(stdin);
+
+            fwrite_stdout("\n: ", 3);
         }
 
         if ((command_result = process_command(line)) != 0)
@@ -511,8 +484,8 @@ int main(void)
     struct sigaction SIGINT_ignore  = {0};
     struct sigaction SIGTSTP_action = {0};
 
-    SIGINT_ignore.sa_handler = SIG_IGN;
-    //sigfillset(&SIGINT_ignore.sa_mask);
+    SIGINT_ignore.sa_handler = SIGINT_main; //SIG_IGN
+    sigfillset(&SIGINT_ignore.sa_mask);
 
     SIGTSTP_action.sa_handler = SIGTSTP_main;
     sigfillset(&SIGTSTP_action.sa_mask);

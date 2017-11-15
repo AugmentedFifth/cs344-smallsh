@@ -4,6 +4,10 @@
 
 
 // Forward declarations
+void SIGINT_main(int signo);
+
+void SIGTSTP_main(int signo);
+
 int exec_command(const char*  command,
                  char* const* args,
                  const char*  input_file,
