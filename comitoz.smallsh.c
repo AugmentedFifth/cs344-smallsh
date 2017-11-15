@@ -11,7 +11,7 @@
 #include <unistd.h>    // chdir, getcwd, getpid, fork, exec, dup2, etc.
 
 
-// Globals
+// (The Dreaded) Globals
 int status = 0;
 bool status_is_term = false;
 
@@ -22,13 +22,8 @@ int child_capacity;
 bool allow_bg = true;
 
 
-// Signal handler for `SIGINT`s sent to the main shell.
 void SIGINT_main(int signo) {}
 
-// Signal handler for `SIGTSTP`s sent to the main shell.
-//
-// Toggles the ability to background commands and spits out a message to the
-// user in lieu of that.
 void SIGTSTP_main(int signo)
 {
     allow_bg = !allow_bg;
@@ -43,7 +38,6 @@ void SIGTSTP_main(int signo)
     }
 }
 
-// Handles `fork()`ing and `exec()`ing commands.
 int exec_command(const char*  command,
                  char* const* args,
                  const char*  input_file,
@@ -182,9 +176,6 @@ int exec_command(const char*  command,
     return 0;
 }
 
-// Checks all currently stored background child processes to see if any of
-// them have terminated since we last checked, waiting for them, deregistering
-// them from the list of background children, and alerting the user.
 int handle_bg_processes(void)
 {
     int i;
@@ -252,8 +243,6 @@ int handle_bg_processes(void)
     return 0;
 }
 
-// Parses a command and redirects its content to the corresponding
-// behavior.
 int process_command(char* line)
 {
     int ret = 0;
@@ -267,7 +256,7 @@ int process_command(char* line)
 
     // State management for the parsing
     char* command = NULL;
-    char* args[512 + 2];
+    char* args[512 + 2]; // Guaranteed to handle 512 (or less) main arguments
     int argc = 1;
     char* input_file = NULL;
     bool looking_for_input = false;
@@ -321,30 +310,6 @@ int process_command(char* line)
     args[0] = command;
     args[argc] = NULL;
 
-    ////////// dEbUg sHiT //////////
-    /*
-    if (command != NULL)
-    {
-        printf("command: %s\n", command);
-    }
-    int i;
-    for (i = 0; i < argc; ++i)
-    {
-        printf("  arg%d: %s\n", i, args[i]);
-    }
-    printf("  last arg is NULL: %s\n", args[i] == NULL ? "true" : "false");
-    if (input_file != NULL)
-    {
-        printf("input file: %s\n", input_file);
-    }
-    if (output_file != NULL)
-    {
-        printf("output file: %s\n", output_file);
-    }
-    printf("background: %s\n", background ? "true" : "false");
-    fflush(stdout);
-    */
-
     // Start doing stuff based on the parsed command, builtins first.
     if (strcmp(command, "exit") == 0)
     {
@@ -354,11 +319,6 @@ int process_command(char* line)
     }
     else if (strcmp(command, "cd") == 0)
     {
-        ////////////
-        //char cwd_buf[1024];
-        //printf("%s\n", getcwd(cwd_buf, 1024 * sizeof(char)));
-        ////////////
-
         if (argc < 2)
         {
             const char* target = getenv("HOME");
@@ -426,8 +386,6 @@ int process_command(char* line)
     return ret;
 }
 
-// Enters the main loop, spitting out a prompt and waiting for commands,
-// forking and executing external commands by calls to other functions.
 int main_loop(void)
 {
     // `getline` stuff

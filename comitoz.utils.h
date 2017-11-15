@@ -12,6 +12,12 @@ typedef enum {false, true} bool;
 
 
 // Prints to stdout, in a reentrant way.
+//
+// Parameters:
+// * `str` - The string to print.
+// * `size` - The length of the string, in terms of `strlen()`, i.e. not
+//            including the trailing `'\0'`.
+//
 // Returns non-zero on failure.
 int write_stdout(const char* str, size_t size)
 {
@@ -40,7 +46,7 @@ int fwrite_stdout(const char* str, size_t size)
     return 0;
 }
 
-// Self-explanatory; same thing as `write_stdout()` but for stderr
+// Self-explanatory; same thing as `write_stdout()` but for stderr.
 int write_stderr(const char* str, size_t size)
 {
     if (write(STDERR_FILENO, str, size) < 0)
@@ -51,7 +57,7 @@ int write_stderr(const char* str, size_t size)
     return 0;
 }
 
-// Self-explanatory; same thing as `fwrite_stdout()` but for stderr
+// Self-explanatory; same thing as `fwrite_stdout()` but for stderr.
 int fwrite_stderr(const char* str, size_t size)
 {
     int r = write_stderr(str, size);
@@ -70,6 +76,12 @@ int fwrite_stderr(const char* str, size_t size)
 
 // Expand all instances of "$$" into the current PID, returning a pointer to
 // a new string that must be `free()`d by the caller.
+//
+// Parameters:
+// * `str` - String to have all "$$" substrings expanded.
+//
+// Returns a pointer to a `malloc()`ed string, which must be `free()`d by the
+// caller.
 char* expand_pid(char* str)
 {
     int str_len = strlen(str);
