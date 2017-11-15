@@ -108,9 +108,9 @@ int exec_command(const char*  command,
                 );
                 if (output_fd == -1)
                 {
-                    write_stderr("Could not open ", 15);
+                    write_stderr("cannot open ", 12);
                     write_stderr(output_file, strlen(output_file));
-                    fwrite_stderr(" for writing\n", 13);
+                    fwrite_stderr(" for output\n", 12);
                     exit(1);
                     break;
                 }
@@ -137,7 +137,7 @@ int exec_command(const char*  command,
         {
             if (background)
             {
-                write_stdout("Started background process ", 27);
+                write_stdout("background pid is ", 18);
                 char num_str[12];
                 sprintf(num_str, "%d\n", spawned_pid);
                 fwrite_stdout(num_str, strlen(num_str));
@@ -484,7 +484,7 @@ int main(void)
     struct sigaction SIGINT_ignore  = {0};
     struct sigaction SIGTSTP_action = {0};
 
-    SIGINT_ignore.sa_handler = SIGINT_main; //SIG_IGN
+    SIGINT_ignore.sa_handler = SIGINT_main;
     sigfillset(&SIGINT_ignore.sa_mask);
 
     SIGTSTP_action.sa_handler = SIGTSTP_main;
@@ -492,9 +492,6 @@ int main(void)
 
     sigaction(SIGINT,  &SIGINT_ignore,  NULL);
     sigaction(SIGTSTP, &SIGTSTP_action, NULL);
-
-    // Start in `$HOME` directory
-    chdir(getenv("HOME"));
 
     // Allocate space to store PIDs of backgrounded children
     child_capacity = 12;
