@@ -2,10 +2,10 @@
 #include "comitoz.utils.h"
 
 #include <fcntl.h>     // open, close
+#include <signal.h>    // sigaction, sigfillset, SIG_IGN, SIG_DFL
 #include <stdlib.h>    // malloc, realloc, free, getenv
 #include <stdio.h>     // getline, perror
 #include <string.h>    // memmove, strtok, strcmp, strcpy, strlen
-#include <sys/stat.h>  // stat
 #include <sys/types.h> // pid_t
 #include <sys/wait.h>  // waitpid
 #include <unistd.h>    // chdir, getcwd, getpid, fork, exec, dup2, etc.
@@ -19,6 +19,34 @@ pid_t* children;
 int child_count = 0;
 int child_capacity;
 
+bool allow_bg = true;
+
+
+/*
+// Signal handler for `SIGINT`s sent to the main shell.
+void SIGINT_main(int signo)
+{
+
+}
+*/
+
+// Signal handler for `SIGTSTP`s sent to the main shell.
+//
+// Toggles the ability to background commands and spits out a message to the
+// user in lieu of that.
+void SIGTSTP_main(int signo)
+{
+    allow_bg = !allow_bg;
+
+    if (allow_bg)
+    {
+        fwrite_stdout("Exiting foreground-only mode\n", 29);
+    }
+    else
+    {
+        fwrite_stdout("Entering foreground-only mode (& is now ignored)\n", 49);
+    }
+}
 
 // Handles `fork()`ing and `exec()`ing commands.
 int exec_command(const char*  command,
@@ -33,12 +61,23 @@ int exec_command(const char*  command,
         case -1:
         {
             perror("fork() failed!");
-            status = 1;
-            status_is_term = false;
             return 1;
         }
         case 0:  // In the child process
         {
+            // If this is a foreground process, we want it to accept `SIGINT`s
+            // normally instead of ignoring them. If this is a background
+            // process then we don't have to do anything since the `SIG_IGN`
+            // will get inherited, which is the desired behavior
+            if (!background)
+            {
+                struct sigaction SIGINT_default = {0};
+
+                SIGINT_default.sa_handler = SIG_DFL;
+
+                sigaction(SIGINT, &SIGINT_default, NULL);
+            }
+
             int input_fd  = -1;
             int output_fd = -1;
             // Redirect inputs and outputs as necessary
@@ -50,11 +89,14 @@ int exec_command(const char*  command,
                 );
                 if (input_fd == -1)
                 {
-                    write_stderr("Could not open ", 15);
+                    write_stderr("cannot open ", 12);
                     write_stderr(input_file, strlen(input_file));
-                    fwrite_stderr(" for reading\n", 13);
-                    status = 1;
-                    status_is_term = false;
+                    fwrite_stderr(" for input\n", 11);
+                    if (!background)
+                    {
+                        status = 1;
+                        status_is_term = false;
+                    }
                     exit(errno);
                     break;
                 }
@@ -62,9 +104,11 @@ int exec_command(const char*  command,
                 if (dup2(input_fd, STDIN_FILENO) == -1)
                 {
                     perror("dup2() failed!");
-                    close(input_fd);
-                    status = 1;
-                    status_is_term = false;
+                    if (!background)
+                    {
+                        status = 1;
+                        status_is_term = false;
+                    }
                     exit(errno);
                     break;
                 }
@@ -81,8 +125,11 @@ int exec_command(const char*  command,
                     write_stderr("Could not open ", 15);
                     write_stderr(output_file, strlen(output_file));
                     fwrite_stderr(" for writing\n", 13);
-                    status = 1;
-                    status_is_term = false;
+                    if (!background)
+                    {
+                        status = 1;
+                        status_is_term = false;
+                    }
                     exit(errno);
                     break;
                 }
@@ -90,13 +137,11 @@ int exec_command(const char*  command,
                 if (dup2(output_fd, STDOUT_FILENO) == -1)
                 {
                     perror("dup2() failed!");
-                    close(output_fd);
-                    if (input_fd != -1)
+                    if (!background)
                     {
-                        close(input_fd);
+                        status = 1;
+                        status_is_term = false;
                     }
-                    status = 1;
-                    status_is_term = false;
                     exit(errno);
                     break;
                 }
@@ -109,16 +154,11 @@ int exec_command(const char*  command,
                 write_stderr("Could not exec ", 15);
                 write_stderr(command, strlen(command));
                 fwrite_stderr("\n", 1);
-                if (input_fd != -1)
+                if (!background)
                 {
-                    close(input_fd);
+                    status = 1;
+                    status_is_term = false;
                 }
-                if (output_fd != -1)
-                {
-                    close(output_fd);
-                }
-                status = 1;
-                status_is_term = false;
                 exit(errno);
                 break;
             }
@@ -147,7 +187,24 @@ int exec_command(const char*  command,
             }
             else
             {
-                waitpid(spawned_pid, &status, 0);
+                int wstatus;
+                waitpid(spawned_pid, &wstatus, 0);
+
+                if (WIFEXITED(wstatus)) // Child terminated normally
+                {
+                    status = WEXITSTATUS(wstatus);
+                    status_is_term = false;
+                }
+                else                    // Child was killed by a signal
+                {
+                    status = WTERMSIG(wstatus);
+                    status_is_term = true;
+
+                    write_stdout("terminated by signal ", 21);
+                    char num_str[12];
+                    sprintf(num_str, "%d\n", status);
+                    fwrite_stdout(num_str, strlen(num_str));
+                }
             }
 
             break;
@@ -157,13 +214,16 @@ int exec_command(const char*  command,
     return 0;
 }
 
+// Checks all currently stored background child processes to see if any of
+// them have terminated since we last checked, waiting for them, deregistering
+// them from the list of background children, and alerting the user.
 int handle_bg_processes(void)
 {
     int i;
     for (i = 0; i < child_count; ++i)
     {
-        int exit_status;
-        pid_t waited = waitpid(children[i], &exit_status, WNOHANG);
+        int wstatus;
+        pid_t waited = waitpid(children[i], &wstatus, WNOHANG);
         switch (waited)
         {
             case -1:
@@ -174,24 +234,35 @@ int handle_bg_processes(void)
             }
             case 0:
             {
-                printf("<><> waited == 0\n");
-
                 break;
             }
             default:
             {
-                printf("<><> default\n");
-
-                write_stdout("Background process ", 19);
+                // Report dead child process
+                write_stdout("background pid ", 15);
                 char num_str[64];
-                sprintf(
-                    num_str,
-                    "%d terminated with exit code %d\n",
-                    children[i],
-                    exit_status
-                );
+                if (WIFEXITED(wstatus)) // Bg process exited normally
+                {
+                    sprintf(
+                        num_str,
+                        "%d is done: exit value %d\n",
+                        children[i],
+                        WEXITSTATUS(wstatus)
+                    );
+                }
+                else                    // Bg process was killed by a signal
+                {
+                    sprintf(
+                        num_str,
+                        "%d is done: terminated by signal %d\n",
+                        children[i],
+                        WTERMSIG(wstatus)
+                    );
+                }
                 fwrite_stdout(num_str, strlen(num_str));
 
+                // Remove dead child PID from `children` array (treating the
+                // array like a `std::vector`, but less C++ and more C89)
                 int trailing_entries = child_count - i - 1;
                 if (trailing_entries > 0)
                 {
@@ -251,7 +322,10 @@ int process_command(char* line)
         }
         else if (strcmp(token, "&") == 0)
         {
-            background = true;
+            if (allow_bg)
+            {
+                background = true;
+            }
         }
         else if (looking_for_input)
         {
@@ -433,14 +507,30 @@ int main_loop(void)
 
 int main(void)
 {
+    // Establish general signal handling
+    struct sigaction SIGINT_ignore  = {0};
+    struct sigaction SIGTSTP_action = {0};
+
+    SIGINT_ignore.sa_handler = SIG_IGN;
+    //sigfillset(&SIGINT_ignore.sa_mask);
+
+    SIGTSTP_action.sa_handler = SIGTSTP_main;
+    sigfillset(&SIGTSTP_action.sa_mask);
+
+    sigaction(SIGINT,  &SIGINT_ignore,  NULL);
+    sigaction(SIGTSTP, &SIGTSTP_action, NULL);
+
+    // Start in `$HOME` directory
     chdir(getenv("HOME"));
 
+    // Allocate space to store PIDs of backgrounded children
     child_capacity = 12;
     children = malloc(child_capacity * sizeof(pid_t));
 
+    // Start up the shell
     int ret = main_loop();
 
-    // Cleanup
+    // Shell is closed, clean up
     free(children);
 
     return ret;
