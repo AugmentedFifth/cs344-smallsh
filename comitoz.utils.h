@@ -7,18 +7,20 @@
 #include <unistd.h> // getpid, STDOUT_FILENO, STDERR_FILENO, write
 
 
-// `typedef`s
+/*** `typedef`s ***/
 typedef enum {false, true} bool;
 
 
+/*** Implementations ***/
+
 // Prints to stdout, in a reentrant way.
 //
-// Parameters:
+// ## Parameters:
 // * `str` - The string to print.
 // * `size` - The length of the string, in terms of `strlen()`, i.e. not
 //            including the trailing `'\0'`.
 //
-// Returns non-zero on failure.
+// **Returns** non-zero on failure.
 int write_stdout(const char* str, size_t size)
 {
     if (write(STDOUT_FILENO, str, size) < 0)
@@ -77,11 +79,16 @@ int fwrite_stderr(const char* str, size_t size)
 // Expand all instances of "$$" into the current PID, returning a pointer to
 // a new string that must be `free()`d by the caller.
 //
-// Parameters:
+// This function is actually fully general; it can be used to replace all
+// occurences of any substring in any given string with any other given
+// substring, but here it is specialized to generate a PID string and replace
+// all instances of "$$" with that.
+//
+// ## Parameters:
 // * `str` - String to have all "$$" substrings expanded.
 //
-// Returns a pointer to a `malloc()`ed string, which must be `free()`d by the
-// caller.
+// **Returns** a pointer to a `malloc()`ed string, which must be `free()`d by
+// the caller.
 char* expand_pid(char* str)
 {
     int str_len = strlen(str);

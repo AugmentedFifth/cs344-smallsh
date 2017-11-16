@@ -2,7 +2,7 @@
 #include "comitoz.utils.h"
 
 #include <fcntl.h>     // open, close
-#include <signal.h>    // sigaction, sigfillset, SIG_IGN, SIG_DFL
+#include <signal.h>    // sigaction, sigfillset, SIG_IGN, SIG_DFL, kill
 #include <stdlib.h>    // malloc, realloc, free, getenv
 #include <stdio.h>     // getline, perror
 #include <string.h>    // memmove, strtok, strcmp, strcpy, strlen
@@ -11,7 +11,7 @@
 #include <unistd.h>    // chdir, getcwd, getpid, fork, exec, dup2, etc.
 
 
-// (The Dreaded) Globals
+/*** (The Dreaded) Globals ***/
 int status = 0;
 bool status_is_term = false;
 
@@ -21,6 +21,8 @@ int child_capacity;
 
 bool allow_bg = true;
 
+
+/*** Implementation ***/
 
 void SIGINT_main(int signo) {}
 
@@ -38,18 +40,32 @@ void SIGTSTP_main(int signo)
     }
 }
 
+void kill_children(void)
+{
+    // Won't somebody, please, think of the children?
+    int i;
+    for (i = 0; i < child_count; ++i)
+    {
+        kill(children[i], SIGTERM);
+    }
+
+    child_count = 0;
+}
+
 int exec_command(const char*  command,
                  char* const* args,
                  const char*  input_file,
                  const char*  output_file,
                  bool         background)
 {
-    pid_t spawned_pid = fork();
+    pid_t spawned_pid = fork(); // Immediately fork and handle child and
+                                // parent separately
     switch (spawned_pid)
     {
         case -1:
         {
-            perror("fork() failed!");
+            perror("fork() failed!"); // Yikes
+
             return 1;
         }
         case 0:  // In the child process
@@ -73,6 +89,7 @@ int exec_command(const char*  command,
             // Redirect inputs and outputs as necessary
             if (input_file != NULL || background)
             {
+                // Open for reading
                 input_fd = open(
                     input_file != NULL ? input_file : "/dev/null",
                     O_RDONLY
@@ -86,6 +103,7 @@ int exec_command(const char*  command,
                     break;
                 }
 
+                // Do the actual redirecion
                 if (dup2(input_fd, STDIN_FILENO) == -1)
                 {
                     perror("dup2() failed!");
@@ -95,6 +113,7 @@ int exec_command(const char*  command,
             }
             if (output_file != NULL || background)
             {
+                // Open for writing
                 output_fd = open(
                     output_file != NULL ? output_file : "/dev/null",
                     O_WRONLY | O_CREAT | O_TRUNC,
@@ -109,6 +128,7 @@ int exec_command(const char*  command,
                     break;
                 }
 
+                // Do the actual redirection
                 if (dup2(output_fd, STDOUT_FILENO) == -1)
                 {
                     perror("dup2() failed!");
@@ -120,6 +140,7 @@ int exec_command(const char*  command,
             // `exec()` away
             if (execvp(command, args) == -1)
             {
+                // Youch
                 write_stderr(command, strlen(command));
                 fwrite_stderr(": no such file or directory\n", 28);
                 exit(1);
@@ -129,13 +150,15 @@ int exec_command(const char*  command,
         }
         default: // In the parent process
         {
-            if (background)
+            if (background) // This is started as a background process
             {
+                // So alert the user as to its PID
                 write_stdout("background pid is ", 18);
                 char num_str[12];
                 sprintf(num_str, "%d\n", spawned_pid);
                 fwrite_stdout(num_str, strlen(num_str));
 
+                // Allocate space to store more child PIDs if needed
                 if (child_count >= child_capacity)
                 {
                     child_capacity *= 2;
@@ -144,14 +167,18 @@ int exec_command(const char*  command,
                         child_capacity * sizeof(pid_t)
                     );
                 }
+                // Register new child process
                 children[child_count] = spawned_pid;
                 child_count++;
             }
-            else
+            else // Otherwise this is a foregrounded process
             {
                 int wstatus;
+                // So we wait for it to complete
                 while (waitpid(spawned_pid, &wstatus, 0) == -1) {}
 
+                // And then set the "status" (and maybe alert the user)
+                // depending on how it completed
                 if (WIFEXITED(wstatus)) // Child terminated normally
                 {
                     status = WEXITSTATUS(wstatus);
@@ -182,20 +209,22 @@ int handle_bg_processes(void)
     for (i = 0; i < child_count; ++i)
     {
         int wstatus;
+        // Try to gather up the finished child process, but don't wait for
+        // it if it's still going
         pid_t waited = waitpid(children[i], &wstatus, WNOHANG);
         switch (waited)
         {
-            case -1:
+            case -1: // Oh no
             {
                 perror("waitpid() failed!");
 
                 return 1;
             }
-            case 0:
+            case 0:  // It's still going, so we leave it alone and do nothing
             {
                 break;
             }
-            default:
+            default: // We got one
             {
                 // Report dead child process
                 write_stdout("background pid ", 15);
@@ -257,12 +286,13 @@ int process_command(char* line)
     // State management for the parsing
     char* command = NULL;
     char* args[512 + 2]; // Guaranteed to handle 512 (or less) main arguments
-    int argc = 1;
+    int argc = 1; // Start with "1 argument" since the first one is always
+                  // just the command
     char* input_file = NULL;
     bool looking_for_input = false;
     char* output_file = NULL;
     bool looking_for_output = false;
-    bool background = false;
+    bool background = false; // Foreground by default
 
     // Parse command, one token at a time
     while (token != NULL)
@@ -279,7 +309,7 @@ int process_command(char* line)
         }
         else if (strcmp(token, "&") == 0)
         {
-            if (allow_bg)
+            if (allow_bg) // This variable is toggled on receipt of a `SIGTSTP`
             {
                 background = true;
             }
@@ -307,19 +337,17 @@ int process_command(char* line)
         token = strtok(NULL, " \n");
     }
 
-    args[0] = command;
-    args[argc] = NULL;
+    args[0] = command; // First arg is always the command name
+    args[argc] = NULL; // Last "arg" is just a `NULL` terminator
 
-    // Start doing stuff based on the parsed command, builtins first.
-    if (strcmp(command, "exit") == 0)
+    // Start doing stuff based on the parsed command, built-ins first.
+    if (strcmp(command, "exit") == 0) // `exit` built-in command
     {
-        // TODO: Kill all processes and jobs here
-
         ret = -1;
     }
-    else if (strcmp(command, "cd") == 0)
+    else if (strcmp(command, "cd") == 0) // `cd` built-in command
     {
-        if (argc < 2)
+        if (argc < 2) // Bare `cd` invocation takes us to the `$HOME` dir
         {
             const char* target = getenv("HOME");
             if (chdir(target) == -1)
@@ -329,7 +357,7 @@ int process_command(char* line)
                 fwrite_stderr("\n", 1);
             }
         }
-        else
+        else // Otherwise we change to the specified dir
         {
             const char* target = args[1];
             if (chdir(target) == -1)
@@ -340,7 +368,7 @@ int process_command(char* line)
             }
         }
     }
-    else if (strcmp(command, "status") == 0)
+    else if (strcmp(command, "status") == 0) // `status` built-in command
     {
         if (status_is_term)
         {
@@ -356,7 +384,7 @@ int process_command(char* line)
 
         fwrite_stdout(num_str, strlen(num_str));
     }
-    else
+    else // Otherwise we `exec`, minding the PATH
     {
         ret = exec_command(
             command,
@@ -393,13 +421,17 @@ int main_loop(void)
     size_t getline_buffer_size = 0;
     ssize_t chars_read;
 
+    // Holds result of calling off to the command-processing function
     int command_result;
 
+    // Main loop, for real
     do
     {
-        int bg_res = handle_bg_processes();
-        if (bg_res != 0)
-        {
+        int bg_res = handle_bg_processes(); // Collect up now-dead child
+                                            // processes and report them just
+                                            // before prompting the user
+        if (bg_res != 0) // Something went terribly wrong with handling the
+        {                // backgrounded children
             if (line != NULL)
             {
                 free(line);
@@ -408,10 +440,12 @@ int main_loop(void)
             return bg_res;
         }
 
-        fwrite_stdout(": ", 2);
+        fwrite_stdout(": ", 2); // Prompt
 
         while ((chars_read = getline(&line, &getline_buffer_size, stdin)) == -1)
         {
+            // `getline()` was interrupted by the signal, so clear the buffer
+            // and re-prompt
             clearerr(stdin);
 
             fwrite_stdout("\n: ", 3);
@@ -419,6 +453,8 @@ int main_loop(void)
 
         if ((command_result = process_command(line)) != 0)
         {
+            // "Please exit" result of calling out to process the command, so
+            // we exit
             if (line != NULL)
             {
                 free(line);
@@ -428,6 +464,7 @@ int main_loop(void)
         }
     } while (1);
 
+    // Clean up one last time
     if (line != NULL)
     {
         free(line);
@@ -459,7 +496,8 @@ int main(void)
     int ret = main_loop();
 
     // Shell is closed, clean up
-    free(children);
+    kill_children();
+    free(children); // Roaming `free` in child-process heaven, probably
 
     return ret;
 }

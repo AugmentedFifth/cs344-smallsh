@@ -3,13 +3,13 @@
 #include "comitoz.utils.h"
 
 
-/* Forward declarations */
+/*** Forward declarations ***/
 
 // Signal handler for `SIGINT`s sent to the main shell. This is a noop
 // function instead of `SIG_IGN` so that we know to re-prompt the user when
 // they send a `SIGINT` to the shell (i.e. `getline()` is interrupted).
 //
-// Parameters:
+// ## Parameters:
 // * `signo` - The signal number that triggered this function. Unused.
 void SIGINT_main(int signo);
 
@@ -18,9 +18,14 @@ void SIGINT_main(int signo);
 // Toggles the ability to background commands and spits out a message to the
 // user in lieu of that.
 //
-// Parameters:
+// ## Parameters:
 // * `signo` - The signal number that triggered this function. Unused.
 void SIGTSTP_main(int signo);
+
+// Fearsomely `SIGTERM`s all child processes and leaves them for dead. Any
+// unruly children who do not properly respond to the `SIGTERM` are left in
+// the cold, uncaring hands of the kernel.
+void kill_children(void);
 
 // Handles `fork()`ing and `exec()`ing commands.
 //
@@ -28,7 +33,7 @@ void SIGTSTP_main(int signo);
 // including setting up input/output redirection, signal handling, and waiting
 // for child processes.
 //
-// Parameters:
+// ## Parameters:
 // * `command` - A string that is the user's typed-in command, after "$$"
 //               expansion.
 // * `args` - A `NULL`-terminated array of strings corresponding to the `argv`
@@ -42,7 +47,7 @@ void SIGTSTP_main(int signo);
 //                   processes and "/dev/null" for background processes.
 // * `background` - Is this command to be run as a background process?
 //
-// Returns non-zero only on catastrophic failure.
+// **Returns** non-zero only on catastrophic failure.
 int exec_command(const char*  command,
                  char* const* args,
                  const char*  input_file,
@@ -53,7 +58,7 @@ int exec_command(const char*  command,
 // them have terminated since we last checked, waiting for them, deregistering
 // them from the list of background children, and alerting the user.
 //
-// Returns zero on success.
+// **Returns** zero on success.
 int handle_bg_processes(void);
 
 // Parses a command and redirects its content to the corresponding
@@ -61,11 +66,11 @@ int handle_bg_processes(void);
 //
 // This function does the "$$" expansion as well as all built-in commands.
 //
-// Parameters:
+// ## Parameters:
 // * `line` - A string representing the literal line entered into the shell
 //            by the user.
 //
-// Returns non-zero when the program should exit, and zero otherwise.
+// **Returns** non-zero when the program should exit, and zero otherwise.
 int process_command(char* line);
 
 // Enters the main loop, spitting out a prompt and waiting for commands,
@@ -74,5 +79,5 @@ int process_command(char* line);
 // Handles re-prompting when `getline()` is interrupted (generally, by some
 // signal handler).
 //
-// Returns zero on success.
+// **Returns** zero on success.
 int main_loop(void);
